@@ -18,6 +18,7 @@ def get_argparser():
     parser.add_argument('--name', default='karate_club', type=str)
     parser.add_argument('--eps', default=1, type=float)
     parser.add_argument('-T', default=100, type=int)
+    parser.add_argument('-l', default=10, type=float, help='Mean of log-normal distribution')
 
     return parser.parse_args()
 
@@ -273,11 +274,11 @@ if __name__ == '__main__':
     G, signals = dataloader.load_dataset(args)
 
     A, n = build_network(G)
-    l = 2
-    
+    l = args.l
+
     if signals is None:
         T = args.T
-        signals = np.log(np.random.lognormal(mean=10, sigma=1, size=(n, T)))
+        signals = np.log(np.random.lognormal(mean=l, sigma=1, size=(n, T)))
     else:
         T = signals.shape[1]
 
