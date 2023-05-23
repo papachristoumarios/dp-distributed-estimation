@@ -106,8 +106,10 @@ def sample_path_plot(A, n, T, l, eps, signals=None, intermittent=True, name='', 
     if signals is None:
         mu_theta = l
     else:
-        mu_theta = signals.mean()
-
+        if intermittent:
+            mu_theta = signals.mean()
+        else:
+            mu_theta = signals[0, :].mean()
 
     error_mu = np.sqrt(np.sum((mu - mu_theta)**2, 0))
     error_nu = np.sqrt(np.sum((mu - mu_theta)**2, 0))
@@ -125,16 +127,16 @@ def sample_path_plot(A, n, T, l, eps, signals=None, intermittent=True, name='', 
 
     ax[1].set_xlabel('Round $t$')
 
-    ax[0].set_ylabel('$\\mu_{i, t}$')
-    ax[1].set_ylabel('$\\nu_{i, t}$')
-    ax[2].set_ylabel('Mean Absolute Error')
+    ax[0].set_ylabel('Sample paths $\\mu_{i, t}$')
+    ax[1].set_ylabel('Sample paths $\\nu_{i, t}$')
+    ax[2].set_ylabel('Mean Squared Error')
 
     ax[0].set_title('Estimates without DP')
     ax[1].set_title(f'Estimates with DP ($\epsilon = {eps}$)')
 
 
-    ax[2].plot(error_mu, label='$|| \\bar {\\mu}_t - 1 m_{\\theta} ||_{2}$')
-    ax[2].plot(error_nu, label='$|| \\bar {\\nu}_t - 1 m_{\\theta} ||_{2}$')
+    ax[2].plot(error_mu, label='$|| \\bar {\\mu}_t - \\bar {m_{\\theta}} ||_{2}$')
+    ax[2].plot(error_nu, label='$|| \\bar {\\nu}_t - \\bar {m_{\\theta}} ||_{2}$')
     ax[2].legend()
 
     ax[2].set_xscale('log')
@@ -146,7 +148,14 @@ def sample_path_plot(A, n, T, l, eps, signals=None, intermittent=True, name='', 
 
 
 def mse_plot(A, n, T, l, n_sim=10, signals=None, eps_conv=1e-3, name=''):
-    mu_theta = l
+
+    if signals is None:
+        mu_theta_mvue = l
+        mu_theta_ol = l
+    else:
+        mu_theta_mvue = signals[0, :].mean()
+        mu_theta_ol = signals.mean()
+
     eps_range = 2**np.arange(-2, 6).astype(np.float64)
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.set_ylabel('MSE (log)')
@@ -169,10 +178,12 @@ def mse_plot(A, n, T, l, n_sim=10, signals=None, eps_conv=1e-3, name=''):
                     for i, eps in enumerate(eps_range):
                         mu, nu = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, signals=signals, intermittent=intermittent, protect_network=protect_network)
                         
-                        mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta)**2))
-                        mse[s, i] = np.sqrt(np.sum((nu[:, -1] - mu[:, -1])**2))
+                        if not intermittent:
+                            mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_mvue)**2))
+                        else:
+                            mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_ol)**2))
 
-                        # t_conv[s, i] = np.where(np.abs(nu - mu_theta).max(0) < eps_conv * mu_theta)[0][0]
+                        mse[s, i] = np.sqrt(np.sum((nu[:, -1] - mu[:, -1])**2))
 
                 mse_omni_mean = mse_omni.mean(0)
                 mse_mean = mse.mean(0)
