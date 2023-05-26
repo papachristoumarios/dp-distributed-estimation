@@ -61,20 +61,18 @@ def mean_estimation(A, n, T, l, eps, signals=None, intermittent=True, protect_ne
         a_diag = np.diag(A)
         A_ndiag = (1 - I) * A
         a_max = A_ndiag.max(0)
-        a_ndiag_sum = A_ndiag.sum(0) 
 
     V = lambda x: np.sum((x - x.mean())**2)
-
 
     V_mu = np.zeros(T + 1)
     V_nu = np.zeros(T + 1)
 
     for t in range(1, T + 1):
+        eta = 1 / t
         if intermittent:
             s = signals[:, t - 1]  
             s_exp = np.exp(s)
             xi = s
-            eta = 1 / t
             if protect_network:
                 self_weight = (1 - eta * (2 - a_diag))
                 d = np.random.laplace(np.maximum(a_max, 1 / s_exp) / eps)
@@ -86,18 +84,23 @@ def mean_estimation(A, n, T, l, eps, signals=None, intermittent=True, protect_ne
                 nu[:, t] = (1 - eta) * (A @ nu[:, t - 1]) + eta * (xi + d)
         else:
             if t == 1:
-                s = signals[:, t - 1]
+                s = signals[:, 0]
                 s_exp = np.exp(s)
                 xi = s
-                d = np.random.laplace(scale=1/(s_exp * eps))
+                if protect_network:
+                    d = np.random.laplace(np.maximum(a_max, 1 / s_exp) / eps)
+                else:
+                    d = np.random.laplace(scale=1/(s_exp * eps))
                 mu[:, t] = xi
                 nu[:, t] = xi + d
             else:
-                mu[:, t] = A @ mu[:, t - 1]
                 nu[:, t] = A @ nu[:, t - 1]
+                mu[:, t] = A @ mu[:, t - 1]
+            
 
         V_mu[t] = V(mu[:, t])
         V_nu[t] = V(nu[:, t])
+
 
     return mu, nu
 
@@ -120,7 +123,7 @@ def sample_path_plot(A, n, T, l, eps, signals=None, intermittent=True, name='', 
     if intermittent:
         plt.suptitle(f"Online Learning of Expected Values ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP")
     else:
-        plt.suptitle(f'Minimum Variance Unbiased Estimation ({get_title(name)})')
+        plt.suptitle(f"Minimum Variance Unbiased Estimation ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP")
 
     for i in range(n):
         ax[0].plot(mu[i, 1:])
@@ -145,7 +148,7 @@ def sample_path_plot(A, n, T, l, eps, signals=None, intermittent=True, name='', 
 
     plt.tight_layout()
 
-    plt.savefig(f"figures/sample_paths_{'intermittent' if intermittent else 'initial'}{'_network' if intermittent and protect_network else ''}_{name}.pdf")
+    plt.savefig(f"figures/sample_paths_{'intermittent' if intermittent else 'initial'}{'_network' if  protect_network else ''}_{name}.pdf")
 
 
 def mse_plot(A, n, T, l, n_sim=10, signals=None, eps_conv=1e-3, name=''):
@@ -157,8 +160,8 @@ def mse_plot(A, n, T, l, n_sim=10, signals=None, eps_conv=1e-3, name=''):
         mu_theta_mvue = signals[0, :].mean()
         mu_theta_ol = signals.mean()
 
-    eps_range = 2**np.arange(-2, 6).astype(np.float64)
-    fig, ax = plt.subplots(figsize=(5, 5))
+    eps_range = 2**np.arange(-4, 4).astype(np.float64)
+    fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_ylabel('MSE (log)')
     ax.set_xlabel('$\\epsilon$ (log)')
     ax.set_xscale('log')
@@ -168,42 +171,39 @@ def mse_plot(A, n, T, l, n_sim=10, signals=None, eps_conv=1e-3, name=''):
 
     for intermittent in [True, False]:
         for protect_network in [True, False]:
-            if not intermittent and protect_network:
-                continue
+            mse_omni = np.zeros((n_sim, eps_range.shape[0]))
+            mse = np.zeros((n_sim, eps_range.shape[0]))
+            t_conv = np.zeros((n_sim, eps_range.shape[0]))
+            for s in range(n_sim):
+                for i, eps in enumerate(eps_range):
+                    mu, nu = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, signals=signals, intermittent=intermittent, protect_network=protect_network)
+                    
+                    if not intermittent:
+                        mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_mvue)**2))
+                    else:
+                        mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_ol)**2))
+
+                    mse[s, i] = np.sqrt(np.sum((nu[:, -1] - mu[:, -1])**2))
+
+            mse_omni_mean = mse_omni.mean(0)
+            mse_mean = mse.mean(0)
+
+            if intermittent and protect_network:
+                label = 'OL w/ Network DP'
+                color = 'r'
+            elif intermittent and not protect_network:
+                label = 'OL w/ Signal DP'
+                color = 'g'    
+            elif not intermittent and protect_network:
+                label = 'MVUE w/ Network DP'
+                color = 'b'
             else:
-
-                mse_omni = np.zeros((n_sim, eps_range.shape[0]))
-                mse = np.zeros((n_sim, eps_range.shape[0]))
-                t_conv = np.zeros((n_sim, eps_range.shape[0]))
-                for s in range(n_sim):
-                    for i, eps in enumerate(eps_range):
-                        mu, nu = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, signals=signals, intermittent=intermittent, protect_network=protect_network)
-                        
-                        if not intermittent:
-                            mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_mvue)**2))
-                        else:
-                            mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_ol)**2))
-
-                        mse[s, i] = np.sqrt(np.sum((nu[:, -1] - mu[:, -1])**2))
-
-                mse_omni_mean = mse_omni.mean(0)
-                mse_mean = mse.mean(0)
-
-                if intermittent and protect_network:
-                    label = 'OL w/ Network DP'
-                    color = 'r'
-                elif intermittent and not protect_network:
-                    label = 'OL w/ Signal DP'
-                    color = 'g'    
-                else:
-                    label = 'MVUE'
-                    color = 'b'
+                label = 'MVUE w/ Signal DP'
+                color = 'k'
+    
+            ax.plot(eps_range, mse_omni_mean, label=f'{label} (TE)', color=color, linestyle='dashed')
+            ax.plot(eps_range, mse_mean, label=f'{label} (CoP)', color=color)
         
-                ax.plot(eps_range, mse_omni_mean, label=f'{label} (Omniscient)', color=color, linestyle='dashed')
-                ax.plot(eps_range, mse_mean, label=label, color=color)
-        
-    # ax[0].plot(eps_range, 2 / eps_range**2, label='Lower bound (Minimum Variance Unbiased Estimation)')
-
 
     ax.legend()
     
@@ -275,6 +275,7 @@ if __name__ == '__main__':
 
     A, n = build_network(G)
     l = args.l
+    eps = args.eps
 
     if signals is None:
         T = args.T
@@ -286,11 +287,11 @@ if __name__ == '__main__':
 
     print(f'n = {n}, m = {len(G.edges())}, T = {T}')
 
-    sample_path_plot(A, n, T, l, eps=1, signals=signals, intermittent=True, name=args.name, protect_network=True)
-    sample_path_plot(A, n, T, l, eps=1, signals=signals, intermittent=True, name=args.name, protect_network=False)
-    sample_path_plot(A, n, T, l, eps=1, signals=signals, intermittent=False, name=args.name)
-
-    mse_plot(A, n, T, l, signals=signals, name=args.name)
+    # sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=True, name=args.name, protect_network=True)
+    # sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=True, name=args.name, protect_network=False)
+    # sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=False, name=args.name)
+    sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=False, protect_network=True, name=args.name)
+    # mse_plot(A, n, T, l, signals=signals, name=args.name)
 
 
 
