@@ -287,11 +287,11 @@ if __name__ == '__main__':
 
     print(f'n = {n}, m = {len(G.edges())}, T = {T}')
 
-    # sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=True, name=args.name, protect_network=True)
-    # sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=True, name=args.name, protect_network=False)
-    # sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=False, name=args.name)
+    sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=True, name=args.name, protect_network=True)
+    sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=True, name=args.name, protect_network=False)
+    sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=False, name=args.name)
     sample_path_plot(A, n, T, l, eps=eps, signals=signals, intermittent=False, protect_network=True, name=args.name)
-    # mse_plot(A, n, T, l, signals=signals, name=args.name)
+    mse_plot(A, n, T, l, signals=signals, name=args.name)
 
 
 
