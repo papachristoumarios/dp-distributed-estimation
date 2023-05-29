@@ -116,7 +116,7 @@ def sample_path_plot(A, n, T, l, eps, signals=None, intermittent=True, name='', 
             mu_theta = signals[0, :].mean()
 
     error_mu = np.sqrt(np.sum((mu - mu_theta)**2, 0))
-    error_nu = np.sqrt(np.sum((mu - mu_theta)**2, 0))
+    error_nu = np.sqrt(np.sum((nu - mu_theta)**2, 0))
 
     fig, ax = plt.subplots(1, 3, figsize=(9, 3))
 
