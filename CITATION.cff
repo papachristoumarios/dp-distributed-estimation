@@ -3,11 +3,9 @@ message: "If you use this software, please cite it as below."
 authors:
 - family-names: Papachristou
   given-names: Marios
-- family-names: Banerjee
-  given-names: Siddhartha
-- family-names: Kleinberg
-  given-names: Jon
-title: "Supplementary Code and Data for 'Dynamic Interventions for Networked Contagions'"
+- family-names: Rahimian
+  given-names: Amin
+title: "Differentially Private Distributed Estimation and Learning"
 version: 1.0.0
-date-released: 2022-05-25
-url: "https://github.com/papachristoumarios/dynamic-clearing"
+date-released: 2023-06-28
+url: "https://github.com/papachristoumarios/dp-distributed-estimation"
