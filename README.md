@@ -7,7 +7,7 @@ Supplementary code for the paper _Differentially Private Distributed Estimation 
 To install the required packages use `pip install requirements.txt`. To run the distributed estimation algorithms use
 
 ```bash
-    python mean_estimation.py --name {name} --eps 1 
+    python mean_estimation.py --name {name} --eps 1 --delta 0.01 
 ```
 
 The following datasets are available:
@@ -17,3 +17,14 @@ The following datasets are available:
  * `ieee_33_bus`: IEEE 33 Bus network
 
 For more options run `python mean_estimation.py --help`. 
+
+
+## Reproducing Experiments
+
+To reproduce the experiments of the paper run the `run_all_experiments.sh` script as 
+
+```bash
+bash run_all_experiments.sh
+```
+
+The resulting figures will be saved in the `figures` directory. 
