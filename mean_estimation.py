@@ -7,9 +7,6 @@ import argparse
 import dataloader
 import powerlaw
 
-random.seed(0)
-np.random.seed(0)
-
 FONTSIZE = 18
 
 def get_argparser():
@@ -23,6 +20,7 @@ def get_argparser():
     parser.add_argument('--task', default='sample_path_plot', type=str, help='sample_path or mse_plot', choices=['sample_path_plot', 'mse_plot', 'visualize'])
     parser.add_argument('--protect_network', action='store_true', help='Protect network structure')
     parser.add_argument('--intermittent', action='store_true', help='Intermittent signals')
+    parser.add_argument('--seed', default=1, type=int)
 
     return parser.parse_args()
 
@@ -85,7 +83,7 @@ def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, pro
             s = signals[:, t - 1]  
             s_exp = np.exp(s)
             xi = s
-            d = np.random.laplace(smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network))
+            d = np.random.laplace(loc=0, scale=smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network))
 
             if protect_network:
                 self_weight = (1 - eta * (2 - a_diag))
@@ -99,7 +97,7 @@ def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, pro
                 s = signals[:, 0]
                 s_exp = np.exp(s)
                 xi = s
-                d = np.random.laplace(smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network))
+                d = np.random.laplace(loc=0, scale=smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network))
                 mu[:, t] = xi
                 nu[:, t] = xi + d
             else:
@@ -277,6 +275,8 @@ def visualize(G, signals, name):
 
 if __name__ == '__main__':
     args = get_argparser()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
 
     print(f'PARAMETERS: {str(args)}\n')
 
