@@ -21,6 +21,8 @@ def get_argparser():
     parser.add_argument('--protect_network', action='store_true', help='Protect network structure')
     parser.add_argument('--intermittent', action='store_true', help='Intermittent signals')
     parser.add_argument('--seed', default=1, type=int)
+    parser.add_argument('--method', choices=['ours', 'rizk'], default='ours')
+    parser.add_argument('--lr_rizk', default=1e-3, type=float)
 
     return parser.parse_args()
 
@@ -42,16 +44,48 @@ def build_network(G):
 
     return A, n
 
-def smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=False):
+def smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=False, eta=1.0):
     beta = eps / (2 * np.log(2 / delta))
     S_signal =  1 / (beta * np.exp(1) * s_exp)
 
     if protect_network:
-        return 2 * np.maximum(a_max / eps, S_signal)
+        return 2 * np.maximum(a_max / eps, eta * S_signal)
     else:
-        return 2 * S_signal
+        return 2 * eta * S_signal
+    
+def mean_estimation_rizk(A, n, T, l, eps, delta, signals=None, protect_network=False, noise='iid', lr=0.4):
 
-def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, protect_network=False):
+    nu = np.zeros((n, T + 1))
+    mu = np.zeros((n, T + 1))
+    
+    I = np.eye(n)
+    a_diag = np.diag(A)
+    A_ndiag = (1 - I) * A
+    a_max = A_ndiag.max(0)
+
+
+    s = signals[:, 0]
+    s_exp = np.exp(s)
+    xi = s
+
+    nu[:, 0] = xi
+    mu[:, 0] = xi
+
+    eps_prime = eps / T
+
+    for t in range(1, T + 1):
+        d = np.random.laplace(loc=0, scale=smooth_sensitivity_lognormal(s_exp, eps_prime, delta, a_max, protect_network=protect_network, eta=lr))
+
+        grad_nu = nu[:, t - 1] - xi
+        grad_mu = mu[:, t - 1] - xi
+
+        nu[:, t] = A @ nu[:, t - 1] - lr * grad_nu + d
+        mu[:, t] = A @ mu[:, t - 1] - lr * grad_mu        
+
+       
+    return mu, nu
+
+def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, protect_network=False, compare=False):
 
     # Mean Estimation
     mu = np.zeros((n, T + 1))
@@ -111,9 +145,12 @@ def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, pro
 
     return mu, nu
 
-def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, name='', protect_network=False):
-    mu, nu = mean_estimation(A, n, T, l, eps, delta, signals, intermittent, protect_network=protect_network)
-    
+def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, name='', protect_network=False, method='ours', lr_rizk=1e-3):
+    if method == 'ours':
+        mu, nu = mean_estimation(A, n, T, l, eps, delta, signals, intermittent, protect_network=protect_network)
+    elif method == 'rizk':
+        mu, nu = mean_estimation_rizk(A, n, T, l, eps, delta, signals, protect_network=protect_network, lr=lr_rizk)
+
     if signals is None:
         mu_theta = l
     else:
@@ -128,9 +165,9 @@ def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, na
     fig, ax = plt.subplots(1, 3, figsize=(9, 3))
 
     if intermittent:
-        plt.suptitle(f"Online Learning of Expected Values ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP")
+        plt.suptitle(f"Online Learning of Expected Values ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP{' (Rizk et al. 2023)' if method == 'rizk' else ''}")
     else:
-        plt.suptitle(f"Minimum Variance Unbiased Estimation ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP")
+        plt.suptitle(f"Minimum Variance Unbiased Estimation ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP{' (Rizk et al. 2023)' if method == 'rizk' else ''}")
 
     for i in range(n):
         ax[0].plot(mu[i, 1:])
@@ -148,6 +185,7 @@ def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, na
 
     ax[2].plot(error_mu, label='$|| \\bar {\\mu}_t - \\bar {m_{\\theta}} ||_{2}$')
     ax[2].plot(error_nu, label='$|| \\bar {\\nu}_t - \\bar {m_{\\theta}} ||_{2}$')
+    
     ax[2].legend()
 
     ax[2].set_xscale('log')
@@ -155,10 +193,10 @@ def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, na
 
     plt.tight_layout()
 
-    plt.savefig(f"figures/sample_paths_{'intermittent' if intermittent else 'initial'}{'_network' if  protect_network else ''}_{name}.png")
+    plt.savefig(f"figures/sample_paths_{'intermittent' if intermittent else 'initial'}{'_network' if  protect_network else ''}_{name}{'_rizk' if method == 'rizk' else ''}.png", bbox_inches='tight')
 
 
-def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name=''):
+def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name='', method='ours', lr_rizk=1e-3):
 
     if signals is None:
         mu_theta_mvue = l
@@ -174,7 +212,7 @@ def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name=''):
     ax.set_xscale('log')
     ax.set_yscale('log')
 
-    ax.set_title(f'MSE vs. Privacy Budget ({get_title(name)})')
+    ax.set_title(f"MSE vs. Privacy Budget ({get_title(name)}){' (Rizk et al. 2023)' if method == 'rizk' else ''}")
 
     for intermittent in [True, False]:
         for protect_network in [True, False]:
@@ -183,8 +221,11 @@ def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name=''):
             t_conv = np.zeros((n_sim, eps_range.shape[0]))
             for s in range(n_sim):
                 for i, eps in enumerate(eps_range):
-                    mu, nu = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, protect_network=protect_network)
-                    
+                    if method == 'ours':
+                        mu, nu = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, protect_network=protect_network)
+                    elif method == 'rizk':
+                        mu, nu = mean_estimation_rizk(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, protect_network=protect_network, lr=lr_rizk)
+
                     if not intermittent:
                         mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_mvue)**2))
                     else:
@@ -216,7 +257,7 @@ def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name=''):
     
     plt.tight_layout()
 
-    plt.savefig(f'figures/mse_plot_{name}.png')
+    plt.savefig(f"figures/mse_plot_{name}{'_rizk' if method == 'rizk' else ''}.png", bbox_inches='tight')
 
 def get_title(name):
     if name == 'germany_consumption':
@@ -289,6 +330,11 @@ if __name__ == '__main__':
     task = args.task
     protect_network = args.protect_network
     intermittent = args.intermittent
+    method  = args.method
+    lr_rizk = args.lr_rizk
+
+    if method == 'rizk' and intermittent:
+        raise Exception('Rizk et al. (2023) does not support intermittent signals')
 
     if signals is None:
         T = args.T
@@ -299,9 +345,9 @@ if __name__ == '__main__':
     print(f'NETWORK STATISTICS: n = {n}, m = {len(G.edges())}, T = {T}\n')
 
     if task == 'sample_path_plot':
-        sample_path_plot(A, n, T, l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, name=args.name, protect_network=protect_network)
+        sample_path_plot(A, n, T, l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, name=args.name, protect_network=protect_network, method=method, lr_rizk=lr_rizk)
     elif task == 'mse_plot':
-        mse_plot(A, n, T, l, delta=delta, signals=signals, name=args.name)
+        mse_plot(A, n, T, l, delta=delta, signals=signals, name=args.name, method=method, lr_rizk=lr_rizk)
     elif task == 'visualize':
         visualize(G, signamls=signals, name=args.name)
     else:
