@@ -23,6 +23,8 @@ def get_argparser():
     parser.add_argument('--seed', default=1, type=int)
     parser.add_argument('--method', choices=['ours', 'rizk'], default='ours')
     parser.add_argument('--lr_rizk', default=1e-3, type=float)
+    parser.add_argument('--distribute_budget', action='store_true', help='Distribute the budget by using heterogeneous eps')
+    parser.add_argument('--eps_upper_bound', default=float('inf'), type=float)
 
     return parser.parse_args()
 
@@ -44,19 +46,38 @@ def build_network(G):
 
     return A, n
 
-def smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=False, eta=1.0):
+def smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=False, eta=1.0, distribute_budget=False, eps_upper_bound=float('inf')):
     beta = eps / (2 * np.log(2 / delta))
     S_signal =  1 / (beta * np.exp(1) * s_exp)
 
+    n = s_exp.shape[0]
+
     if protect_network:
-        return 2 * np.maximum(a_max / eps, eta * S_signal)
+        D = np.maximum(a_max, 2 * eta * S_signal)
     else:
-        return 2 * eta * S_signal
-    
-def mean_estimation_rizk(A, n, T, l, eps, delta, signals=None, protect_network=False, noise='iid', lr=0.4):
+        D = 2 * eta * S_signal
+
+    max_total_power = (1 / eps) * D.sum()
+    min_total_power = (1 / eps_upper_bound) * D.sum()
+
+    if distribute_budget:
+        eps_new = (n * eps) * np.sqrt(D) / (np.sqrt(D).sum())
+        eps_new = np.minimum(eps_new, eps_upper_bound)
+        scale = D / eps_new
+    else:
+        scale = D / eps
+
+    total_power = scale.sum()
+
+    return scale, max_total_power, min_total_power, total_power
+
+def mean_estimation_rizk(A, n, T, l, eps, delta, signals=None, protect_network=False, noise='iid', lr=0.4, distribute_budget=False, eps_upper_bound=float('inf')):
 
     nu = np.zeros((n, T + 1))
     mu = np.zeros((n, T + 1))
+    max_total_power = np.zeros(T + 1)
+    min_total_power = np.zeros(T + 1)
+    total_power = np.zeros(T + 1)
     
     I = np.eye(n)
     a_diag = np.diag(A)
@@ -74,23 +95,26 @@ def mean_estimation_rizk(A, n, T, l, eps, delta, signals=None, protect_network=F
     eps_prime = eps / T
 
     for t in range(1, T + 1):
-        d = np.random.laplace(loc=0, scale=smooth_sensitivity_lognormal(s_exp, eps_prime, delta, a_max, protect_network=protect_network, eta=lr))
+        scale, max_total_power[t], min_total_power[t], total_power[t] = smooth_sensitivity_lognormal(s_exp, eps_prime, delta, a_max, protect_network=protect_network, eta=lr, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
+        d = np.random.laplace(loc=0, scale=scale)
 
         grad_nu = nu[:, t - 1] - xi
         grad_mu = mu[:, t - 1] - xi
 
         nu[:, t] = A @ nu[:, t - 1] - lr * grad_nu + d
         mu[:, t] = A @ mu[:, t - 1] - lr * grad_mu        
-
        
-    return mu, nu
+    return mu, nu, max_total_power, min_total_power, total_power
 
-def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, protect_network=False, compare=False):
+def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, protect_network=False, distribute_budget=False, eps_upper_bound=float('inf')):
 
     # Mean Estimation
     mu = np.zeros((n, T + 1))
     nu = np.zeros((n, T + 1)) 
-
+    max_total_power = np.zeros(T + 1)
+    min_total_power = np.zeros(T + 1)
+    total_power = np.zeros(T + 1)
+    
     if signals is not None:
         if intermittent:
             mu_theta = signals.mean()
@@ -117,7 +141,8 @@ def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, pro
             s = signals[:, t - 1]  
             s_exp = np.exp(s)
             xi = s
-            d = np.random.laplace(loc=0, scale=smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network))
+            scale, max_total_power[t], min_total_power[t], total_power[t] = smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
+            d = np.random.laplace(loc=0, scale=scale)
 
             if protect_network:
                 self_weight = (1 - eta * (2 - a_diag))
@@ -131,7 +156,8 @@ def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, pro
                 s = signals[:, 0]
                 s_exp = np.exp(s)
                 xi = s
-                d = np.random.laplace(loc=0, scale=smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network))
+                scale, max_total_power[t], min_total_power[t], total_power[t] = smooth_sensitivity_lognormal(s_exp, eps, delta, a_max, protect_network=protect_network, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
+                d = np.random.laplace(loc=0, scale=scale)
                 mu[:, t] = xi
                 nu[:, t] = xi + d
             else:
@@ -143,13 +169,13 @@ def mean_estimation(A, n, T, l, eps, delta, signals=None, intermittent=True, pro
         V_nu[t] = V(nu[:, t])
 
 
-    return mu, nu
+    return mu, nu, max_total_power, min_total_power, total_power
 
-def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, name='', protect_network=False, method='ours', lr_rizk=1e-3):
+def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, name='', protect_network=False, method='ours', lr_rizk=1e-3, distribute_budget=False, eps_upper_bound=float('inf')):
     if method == 'ours':
-        mu, nu = mean_estimation(A, n, T, l, eps, delta, signals, intermittent, protect_network=protect_network)
+        mu, nu, max_total_power, min_total_power, total_power  = mean_estimation(A, n, T, l, eps, delta, signals, intermittent, protect_network=protect_network, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
     elif method == 'rizk':
-        mu, nu = mean_estimation_rizk(A, n, T, l, eps, delta, signals, protect_network=protect_network, lr=lr_rizk)
+        mu, nu, max_total_power, min_total_power, total_power = mean_estimation_rizk(A, n, T, l, eps, delta, signals, protect_network=protect_network, lr=lr_rizk, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
 
     if signals is None:
         mu_theta = l
@@ -162,18 +188,20 @@ def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, na
     error_mu = np.sqrt(np.sum((mu - mu_theta)**2, 0))
     error_nu = np.sqrt(np.sum((nu - mu_theta)**2, 0))
 
-    fig, ax = plt.subplots(1, 3, figsize=(9, 3))
+    fourth_plot = int(distribute_budget and intermittent)
+
+    fig, ax = plt.subplots(1, 3 + fourth_plot, figsize=(9 + 3 * fourth_plot, 3))
 
     if intermittent:
-        plt.suptitle(f"Online Learning of Expected Values ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP{' (Rizk et al. 2023)' if method == 'rizk' else ''}")
+        fig.suptitle(f"Online Learning of Expected Values ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP{' (Rizk et al. 2023)' if method == 'rizk' else ''}")
     else:
-        plt.suptitle(f"Minimum Variance Unbiased Estimation ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP{' (Rizk et al. 2023)' if method == 'rizk' else ''}")
+        fig.suptitle(f"Minimum Variance Unbiased Estimation ({get_title(name)}) with {'Network' if protect_network else 'Signal'} DP{' (Rizk et al. 2023)' if method == 'rizk' else ''}")
 
     for i in range(n):
         ax[0].plot(mu[i, 1:])
         ax[1].plot(nu[i, 1:])
 
-    ax[1].set_xlabel('Round $t$')
+    fig.supxlabel('Round $t$')
 
     ax[0].set_ylabel('Sample paths $\\mu_{i, t}$')
     ax[1].set_ylabel('Sample paths $\\nu_{i, t}$')
@@ -191,12 +219,24 @@ def sample_path_plot(A, n, T, l, eps, delta, signals=None, intermittent=True, na
     ax[2].set_xscale('log')
     ax[2].set_yscale('log')
 
-    plt.tight_layout()
 
-    plt.savefig(f"figures/sample_paths_{'intermittent' if intermittent else 'initial'}{'_network' if  protect_network else ''}_{name}{'_rizk' if method == 'rizk' else ''}.png", bbox_inches='tight')
+    if distribute_budget and intermittent:
+        ax[3].set_ylabel('Privacy Overhead')
+
+        ax[3].plot(max_total_power[1:], label='Upper Bound')
+        ax[3].plot(min_total_power[1:], label='Lower Bound')
+        ax[3].plot(total_power[1:], label='Optimal')
+
+        ax[3].set_xlim(0, T - 1)
+
+        ax[3].legend(loc='upper left')
+
+        
+    fig.tight_layout()
+    fig.savefig(f"figures/sample_paths_{'intermittent' if intermittent else 'initial'}{'_network' if  protect_network else ''}_{name}{'_rizk' if method == 'rizk' else ''}{'_heterogeneous' if distribute_budget else ''}.png", bbox_inches='tight')
 
 
-def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name='', method='ours', lr_rizk=1e-3):
+def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name='', method='ours', lr_rizk=1e-3, distribute_budget=False, eps_upper_bound=float('inf')):
 
     if signals is None:
         mu_theta_mvue = l
@@ -222,9 +262,9 @@ def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name='', 
             for s in range(n_sim):
                 for i, eps in enumerate(eps_range):
                     if method == 'ours':
-                        mu, nu = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, protect_network=protect_network)
+                        mu, nu, _, _, _ = mean_estimation(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, protect_network=protect_network, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
                     elif method == 'rizk':
-                        mu, nu = mean_estimation_rizk(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, protect_network=protect_network, lr=lr_rizk)
+                        mu, nu, _, _, _ = mean_estimation_rizk(A=A, n=n, T=T, l=l, eps=eps, delta=delta, signals=signals, protect_network=protect_network, lr=lr_rizk, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
 
                     if not intermittent:
                         mse_omni[s, i] = np.sqrt(np.sum((nu[:, -1] - mu_theta_mvue)**2))
@@ -257,7 +297,7 @@ def mse_plot(A, n, T, l, delta, n_sim=10, signals=None, eps_conv=1e-3, name='', 
     
     plt.tight_layout()
 
-    plt.savefig(f"figures/mse_plot_{name}{'_rizk' if method == 'rizk' else ''}.png", bbox_inches='tight')
+    plt.savefig(f"figures/mse_plot_{name}{'_rizk' if method == 'rizk' else ''}{'_heterogeneous' if distribute_budget else ''}.png", bbox_inches='tight')
 
 def get_title(name):
     if name == 'germany_consumption':
@@ -332,6 +372,8 @@ if __name__ == '__main__':
     intermittent = args.intermittent
     method  = args.method
     lr_rizk = args.lr_rizk
+    distribute_budget = args.distribute_budget
+    eps_upper_bound = args.eps_upper_bound
 
     if method == 'rizk' and intermittent:
         raise Exception('Rizk et al. (2023) does not support intermittent signals')
@@ -345,9 +387,9 @@ if __name__ == '__main__':
     print(f'NETWORK STATISTICS: n = {n}, m = {len(G.edges())}, T = {T}\n')
 
     if task == 'sample_path_plot':
-        sample_path_plot(A, n, T, l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, name=args.name, protect_network=protect_network, method=method, lr_rizk=lr_rizk)
+        sample_path_plot(A, n, T, l, eps=eps, delta=delta, signals=signals, intermittent=intermittent, name=args.name, protect_network=protect_network, method=method, lr_rizk=lr_rizk, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
     elif task == 'mse_plot':
-        mse_plot(A, n, T, l, delta=delta, signals=signals, name=args.name, method=method, lr_rizk=lr_rizk)
+        mse_plot(A, n, T, l, delta=delta, signals=signals, name=args.name, method=method, lr_rizk=lr_rizk, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
     elif task == 'visualize':
         visualize(G, signamls=signals, name=args.name)
     else:
