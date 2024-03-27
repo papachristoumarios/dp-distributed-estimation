@@ -7,5 +7,6 @@ authors:
   given-names: Amin
 title: "Differentially Private Distributed Estimation and Learning"
 version: 1.0.0
+journal: IISE Transactions
 date-released: 2023-06-28
 url: "https://github.com/papachristoumarios/dp-distributed-estimation"
