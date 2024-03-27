@@ -366,7 +366,7 @@ def visualize(G, signals, name):
     degrees = np.array([1 + G.degree(u) for u in G.nodes()])
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_title(f'Degree Distribution ({get_title(name)})')
+    ax.set_title(f'Degree Distribution ({get_title(name)})', fontsize=FONTSIZE)
 
     
     fit = powerlaw.Fit(degrees, xmin=1)
@@ -377,7 +377,7 @@ def visualize(G, signals, name):
     plt.ylabel('Frequency', fontsize=FONTSIZE)
     plt.legend(fontsize=0.5*FONTSIZE)
 
-    plt.savefig(f'figures/{name}_degree_distribution.png')
+    plt.savefig(f'figures/{name}_degree_distribution.pdf')
 
 if __name__ == '__main__':
     args = get_argparser()
@@ -416,7 +416,7 @@ if __name__ == '__main__':
     elif task == 'mse_plot':
         mse_plot(A, n, T, l, delta=delta, signals=signals, name=args.name, method=method, lr_rizk=lr_rizk, distribute_budget=distribute_budget, eps_upper_bound=eps_upper_bound)
     elif task == 'visualize':
-        visualize(G, signamls=signals, name=args.name)
+        visualize(G, signals=signals, name=args.name)
     else:
         raise Exception('Invalid task')
 
